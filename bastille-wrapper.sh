@@ -12,9 +12,6 @@
 if [ ! -d "$BASTILLE_ROOT" ]; then
     echo "Error: Bastille root not a directory -> ${BASTILLE_ROOT}"
     exit 1
-elif [ ! -d "${BASTILLE_ROOT}/templates/${TEMPLATE}" ]; then
-    echo "Error: Template ${TEMPLATE} not found -> ${BASTILLE_ROOT}/templates/${TEMPLATE}"
-    exit 1
 elif [ ! -d "${BASTILLE_ROOT}/releases/${RELEASE}" ]; then
     echo "Error: Release ${RELEASE} not found -> ${BASTILLE_ROOT}/releases/${RELEASE}"
     exit 1
@@ -31,16 +28,7 @@ F_BRIDGE=''
 F_VNET=''
 F_MAC=''
 F_DUAL=''
-F_FORCE=''
 F_RESTART=''
-
-destroy_jail() {
-    if [ -n "$F_FORCE" ] && [ -n "$JNAME" ]; then
-        echo "Critical error occurred. Force-cleaning jail $JNAME..."
-        bastille destroy -f "$JNAME" >/dev/null 2>&1 || true
-    fi
-    exit 1
-}
 
 process_section() {
     [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ] && return
@@ -58,23 +46,17 @@ process_section() {
             
             case "$1" in
                 SETTINGS)
-                    set -- $line
-                    local s_key=$1
-                    shift
-                    local s_val="$*"
-                    echo "Setting $s_key = $s_val"
-                    bastille config "$JNAME" set "$s_key" "$s_val"
+                    echo "Applying setting: $line"
+                    bastille config "$JNAME" set $line
                     ;;
                 MOUNTS)
-                    # Parse: "host_dir" "jail_dir" [setting]
-                    # We pass the full line to bastille mount for flexibility
-                    echo "Mounting: $line"
+                    echo "Applying mount: $line"
                     if ! bastille mount "$JNAME" $line; then
-                        destroy_jail
+                        exit 1
                     fi
                     ;;
-                SYSRC|RCCONF)
-                    echo "Applying to rc.conf: $line"
+                SYSRC)
+                    echo "Applying sysrc: $line"
                     bastille sysrc "$JNAME" "$line"
                     ;;
                 TEMPLATES)
@@ -83,7 +65,7 @@ process_section() {
                     ;;
                 CMD)
                     echo "Executing in jail: $line"
-                    bastille cmd "$JNAME" /bin/sh -c "$line" || true
+                    bastille cmd "$JNAME" /bin/sh -c "$line"
                     ;;
             esac
         fi
@@ -103,12 +85,11 @@ usage() {
     echo "  -D           Enable IPv4 & IPv6"
     echo "  -M           Assign static mac address"
     echo "  -V           VNET mode"
-    echo "  -F           Force clean (destroy jail on create/mount failure)"
     echo "  -x           Restart jail after creation"
     exit 1
 }
 
-while getopts "n:i:I:R:C:bBDMVFx" opt; do
+while getopts "n:i:I:R:C:bBDMVx" opt; do
     case "$opt" in
         n) JNAME=$OPTARG ;;
         i) IP=$OPTARG ;;
@@ -120,7 +101,6 @@ while getopts "n:i:I:R:C:bBDMVFx" opt; do
         D) F_DUAL='-D' ;;
         M) F_MAC='-M' ;;
         V) F_VNET='-V' ;;
-        F) F_FORCE='1' ;;
         x) F_RESTART='1' ;;
         *) usage ;;
     esac
@@ -150,12 +130,12 @@ fi
 
 echo "Creating jail: $JNAME..."
 if ! bastille create $F_BRIDGE $F_VNET $F_MAC $F_DUAL $BOOT "$JNAME" "$RELEASE" "$IP" "$IF"; then
-    destroy_jail
+    exit 1
 fi
 
-process_section MOUNTS
 process_section SETTINGS
-process_section RCCONF
+process_section MOUNTS
+process_section SYSRC
 process_section TEMPLATES
 process_section CMD
 
