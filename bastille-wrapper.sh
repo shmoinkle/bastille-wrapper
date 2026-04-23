@@ -30,48 +30,6 @@ F_MAC=''
 F_DUAL=''
 F_RESTART=''
 
-process_section() {
-    [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ] && return
-    local in_section=0
-    while IFS= read -r line; do
-        if [ "$line" = "#!$1" ]; then
-            in_section=1
-            continue
-        fi
-        if [ "$in_section" -eq 1 ]; then
-            case "$line" in
-                ""|"#!"*) break ;;
-                "#"*) continue ;;
-            esac
-            
-            case "$1" in
-                SETTINGS)
-                    echo "Applying setting: $line"
-                    bastille config "$JNAME" set $line
-                    ;;
-                MOUNTS)
-                    echo "Applying mount: $line"
-                    if ! bastille mount "$JNAME" $line; then
-                        exit 1
-                    fi
-                    ;;
-                SYSRC)
-                    echo "Applying sysrc: $line"
-                    bastille sysrc "$JNAME" "$line"
-                    ;;
-                TEMPLATES)
-                    echo "Applying template: $line"
-                    bastille template "$JNAME" "$line"
-                    ;;
-                CMD)
-                    echo "Executing in jail: $line"
-                    bastille cmd "$JNAME" /bin/sh -c "$line"
-                    ;;
-            esac
-        fi
-    done < "$CONFIG_FILE"
-}
-
 usage() {
     echo "Usage: $0 -n name -i ip [options]"
     echo "Options:"
@@ -128,16 +86,109 @@ if [ -n "$F_BRIDGE" ]; then
     fi
 fi
 
+DEFAULT_ORDER="SETTINGS MOUNTS SYSRC TEMPLATES CMD"
+
+process_section() {
+    local target_section=$1
+    [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ] && return
+    local in_section=0
+    while IFS= read -r line; do
+        if [ "$line" = "#!$target_section" ]; then
+            in_section=1
+            continue
+        fi
+        if [ "$in_section" -eq 1 ]; then
+            case "$line" in
+                ""|"#!"*) break ;;
+                "#"*) continue ;;
+            esac
+            
+            case "$target_section" in
+                SETTINGS)
+                    echo "Applying setting: $line"
+                    bastille config "$JNAME" set $line
+                    ;;
+                MOUNTS)
+                    echo "Applying mount: $line"
+                    if ! bastille mount "$JNAME" $line; then
+                        exit 1
+                    fi
+                    ;;
+                SYSRC)
+                    echo "Applying sysrc: $line"
+                    bastille sysrc "$JNAME" "$line"
+                    ;;
+                TEMPLATES)
+                    echo "Applying template: $line"
+                    bastille template "$JNAME" "$line"
+                    ;;
+                CMD)
+                    echo "Executing in jail: $line"
+                    bastille cmd "$JNAME" /bin/sh -c "$line"
+                    ;;
+            esac
+        fi
+    done < "$CONFIG_FILE"
+}
+
+get_order() {
+    local custom_order=""
+    local seen_header=0
+    local order_processed=0
+    local is_first_section=1
+    local current_section=""
+    
+    while IFS= read -r line; do
+        case "$line" in
+            ""|"#"*) continue ;;
+            "#"*) continue ;;
+            "#!"*) 
+                current_section="${line##!}"
+                # If we hit an ORDER block
+                if [ "$current_section" = "ORDER" ]; then
+                    if [ "$is_first_section" -eq 1 ]; then
+                        order_processed=1
+                        continue
+                    else
+                        echo "Warning: #!ORDER should be first, skipping!" >&2
+                        continue
+                    fi
+                fi
+                is_first_section=0
+                continue
+                ;;
+            *)
+                if [ "$order_processed" -eq 1 ]; then
+                    if [ "$line" = "ORDER" ]; then
+                        echo "Warning: ORDER cannot be specified in ORDER, skipping!" >&2
+                        continue
+                    fi
+                    custom_order="$custom_order $line"
+                fi
+                ;;
+        esac
+    done < "$CONFIG_FILE"
+    
+    if [ -n "$custom_order" ]; then
+        echo "$custom_order"
+    else
+        echo "$DEFAULT_ORDER"
+    fi
+}
+
 echo "Creating jail: $JNAME..."
 if ! bastille create $F_BRIDGE $F_VNET $F_MAC $F_DUAL $BOOT "$JNAME" "$RELEASE" "$IP" "$IF"; then
     exit 1
 fi
 
-process_section SETTINGS
-process_section MOUNTS
-process_section SYSRC
-process_section TEMPLATES
-process_section CMD
+for section in $(get_order); do
+    if [ "$section" = "RESTART" ]; then
+        echo "Restarting jail $JNAME..."
+        bastille restart "$JNAME"
+    else
+        process_section "$section"
+    fi
+done
 
 if [ -n "$F_RESTART" ]; then
     echo "Restarting jail $JNAME..."

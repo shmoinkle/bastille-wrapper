@@ -34,11 +34,21 @@ An orchestration wrapper for bastille to simplify the creation of a jail, given 
 - A section ends when an empty line or a line starting with `#!` is encountered.
 
 ### Sections
+
+- You can use any of these configuration blocks in any order you like.
+	- If you don't have any **SETTINGS** to apply, just drop that block.
+	- The order of these blocks will be the order they're run in, _UNLESS-_
+	- You configure the **ORDER** setting (read below).
+
 - `#!SETTINGS`: Key-value pairs for `bastille config`.
 - `#!MOUNTS`: Mount definitions (passed directly to `bastille mount`).
 - `#!SYSRC`: Service configurations (uses `bastille sysrc`).
 - `#!TEMPLATES`: Bastille templates to apply in order.
 - `#!CMD`: Commands to execute IN jail.
+- `#!ORDER`: Define the execution order of sections.
+	- Use keword **RESTART** to trigger a jail restart during orchestration.
+	- You can repeat task blocks (run **TEMPLATES** then **CMD** then **TEMPLATES** again).
+	- You cannot specify **ORDER** in the list to avoid 🔁
 
 ## Example
 
@@ -51,6 +61,15 @@ bastille-wrapper.sh -bBDMx -n app1 -i 10.0.0.40/24 -I bridge1 -C app1.conf
 ### Jail Configuration File
 - **app1.conf's** contents _(**jail.example.conf** is used in this example)_
 ```bash
+#!ORDER
+SETTINGS
+MOUNTS
+RESTART
+TEMPLATES
+SYSRC
+RESTART
+CMD
+
 #!SETTINGS
 priority 50
 allow.mlock 1
@@ -88,11 +107,12 @@ bastille mount app1 /usr/local/bastille/jails/mainjail/root/usr/local /usr/local
 bastille mount app1 /home/app1 /root nullfs rw 0 0
 bastille mount app1 /home/app1/configs /etc/app1 nullfs rw 0 0
 bastille mount app1 "/home/app1/music\ files" /mnt/music nullfs rw 0 0
-bastille sysrc app1 nginx_enable="YES"
-bastille sysrc app1 php_fpm_enable="YES"
+bastille restart app1
 bastille template app1 user/skeljail
 bastille template app1 user/my-custom-template
-bastille template app1 me/skeljail
+bastille sysrc app1 nginx_enable="YES"
+bastille sysrc app1 php_fpm_enable="YES"
+bastille restart app1
 bastille cmd app1 /bin/sh -c "pw useradd checker -u 1001 -d /nonexistent -s /sbin/nologin"
 bastille cmd app1 /bin/sh -c "echo \"* * * * * /root/lazy-check-that-thing.sh\" | crontab -u checker -"
 bastille restart app1
