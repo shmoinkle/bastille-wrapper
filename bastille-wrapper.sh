@@ -7,7 +7,7 @@
 #   this script only does basic sanity checks so make sure your confs
 #   are good (no bad paths or typos).
 
-. "$(dirname "$0")/config.conf"
+. "$(dirname "$0")/configs/config.conf"
 
 if [ ! -d "$BASTILLE_ROOT" ]; then
     echo "Error: Bastille root not a directory -> ${BASTILLE_ROOT}"
@@ -86,7 +86,7 @@ if [ -n "$F_BRIDGE" ]; then
     fi
 fi
 
-DEFAULT_ORDER="SETTINGS MOUNTS SYSRC TEMPLATES CMD"
+DEFAULT_ORDER="CREATE SETTINGS MOUNTS SYSRC TEMPLATES COPY CMD"
 
 process_section() {
     local target_section=$1
@@ -122,6 +122,10 @@ process_section() {
                     echo "Applying template: $line"
                     bastille template "$JNAME" "$line"
                     ;;
+                COPY)
+                    echo "Copying file: $line"
+                    bastille cp "$JNAME" $line
+                    ;;
                 CMD)
                     echo "Executing in jail: $line"
                     bastille cmd "$JNAME" /bin/sh -c "$line"
@@ -130,21 +134,19 @@ process_section() {
         fi
     done < "$CONFIG_FILE"
 }
-
 get_order() {
     local custom_order=""
     local seen_header=0
     local order_processed=0
     local is_first_section=1
     local current_section=""
-    
+
     while IFS= read -r line; do
         case "$line" in
             ""|"#"*) continue ;;
             "#"*) continue ;;
             "#!"*) 
-                current_section="${line##!}"
-                # If we hit an ORDER block
+                current_section="${line#*!}"
                 if [ "$current_section" = "ORDER" ]; then
                     if [ "$is_first_section" -eq 1 ]; then
                         order_processed=1
@@ -155,6 +157,7 @@ get_order() {
                     fi
                 fi
                 is_first_section=0
+                [ "$order_processed" -eq 0 ] && break
                 continue
                 ;;
             *)
@@ -168,7 +171,7 @@ get_order() {
                 ;;
         esac
     done < "$CONFIG_FILE"
-    
+
     if [ -n "$custom_order" ]; then
         echo "$custom_order"
     else
@@ -176,18 +179,27 @@ get_order() {
     fi
 }
 
-echo "Creating jail: $JNAME..."
-if ! bastille create $F_BRIDGE $F_VNET $F_MAC $F_DUAL $BOOT "$JNAME" "$RELEASE" "$IP" "$IF"; then
-    exit 1
-fi
+order=$(get_order)
+echo "Execution Order: $order"
 
-for section in $(get_order); do
-    if [ "$section" = "RESTART" ]; then
+is_first_step=1
+for section in $order; do
+    if [ "$section" = "CREATE" ]; then
+        if [ "$is_first_step" -eq 1 ]; then
+            echo "Creating jail: $JNAME..."
+            if ! bastille create $F_BRIDGE $F_VNET $F_MAC $F_DUAL $BOOT "$JNAME" "$RELEASE" "$IP" "$IF"; then
+                exit 1
+            fi
+        else
+            echo "Skipping CREATE task as it was not first in ORDER list." >&2
+        fi
+    elif [ "$section" = "RESTART" ]; then
         echo "Restarting jail $JNAME..."
         bastille restart "$JNAME"
     else
         process_section "$section"
     fi
+    is_first_step=0
 done
 
 if [ -n "$F_RESTART" ]; then

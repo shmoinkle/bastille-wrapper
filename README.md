@@ -6,6 +6,8 @@
 
 An orchestration wrapper for bastille to simplify the creation of a jail, given you have a list of things you plan to do with the jail after you make it.
 
+Apart from basic examples in the **configs** directory, I include some real and usable confs for deploying specialized applications.
+
 ## Usage
 
 ```bash
@@ -40,15 +42,21 @@ An orchestration wrapper for bastille to simplify the creation of a jail, given 
 	- The order of these blocks will be the order they're run in, _UNLESS-_
 	- You configure the **ORDER** setting (read below).
 
+- `#!ORDER`: Define the execution order of sections.
+	- The first command should be **CREATE** if you are making a new jail.
+		- When **CREATE** isn't called, flags related only to **CREATE** tasks* are ignored and won't impact the run.
+		- Full list of ignored flags when **CREATE** isn't called: _-i, -I, -R, -B, -D, -M, -V_
+	- If you don't specify **CREATE** first, the script will apply settings to the jail name provided.
+		- If **CREATE** is not the first in the list, it is skipped.
+	- Use keyword **RESTART** to trigger a jail restart during orchestration.
+	- You can repeat task blocks (run **TEMPLATES** then **CMD** then **TEMPLATES** again).
+	- You cannot specify **ORDER** in the list to avoid 🔁
 - `#!SETTINGS`: Key-value pairs for `bastille config`.
 - `#!MOUNTS`: Mount definitions (passed directly to `bastille mount`).
 - `#!SYSRC`: Service configurations (uses `bastille sysrc`).
 - `#!TEMPLATES`: Bastille templates to apply in order.
+- `#!COPY`: Copy files and folders into the jail using `bastille cp`.
 - `#!CMD`: Commands to execute IN jail.
-- `#!ORDER`: Define the execution order of sections.
-	- Use keword **RESTART** to trigger a jail restart during orchestration.
-	- You can repeat task blocks (run **TEMPLATES** then **CMD** then **TEMPLATES** again).
-	- You cannot specify **ORDER** in the list to avoid 🔁
 
 ## Example
 
@@ -62,12 +70,14 @@ bastille-wrapper.sh -bBDMx -n app1 -i 10.0.0.40/24 -I bridge1 -C app1.conf
 - **app1.conf's** contents _(**jail.example.conf** is used in this example)_
 ```bash
 #!ORDER
+CREATE
 SETTINGS
 MOUNTS
 RESTART
 TEMPLATES
 SYSRC
 RESTART
+COPY
 CMD
 
 #!SETTINGS
@@ -90,12 +100,14 @@ php_fpm_enable="YES"
 user/skeljail
 user/my-custom-template
 
+#!COPY
+/host/opts/scripts/lazy-checker.sh /root/lazy-check-that-thing.sh
+
 #!CMD
 pw useradd checker -u 1001 -d /nonexistent -s /sbin/nologin
 echo "* * * * * /root/lazy-check-that-thing.sh" | crontab -u checker -
 
 ```
-
 ### Result
 - This is the the list of commands that will be run to make **app1**
 ```bash
@@ -113,6 +125,7 @@ bastille template app1 user/my-custom-template
 bastille sysrc app1 nginx_enable="YES"
 bastille sysrc app1 php_fpm_enable="YES"
 bastille restart app1
+bastille cp app1 /host/opts/scripts/lazy-checker.sh /root/lazy-check-that-thing.sh
 bastille cmd app1 /bin/sh -c "pw useradd checker -u 1001 -d /nonexistent -s /sbin/nologin"
 bastille cmd app1 /bin/sh -c "echo \"* * * * * /root/lazy-check-that-thing.sh\" | crontab -u checker -"
 bastille restart app1
@@ -128,12 +141,12 @@ bastille restart app1
 
 ## What it Doesn't Do
 - **Error Handling**: If the script fails to create the jail or a mount fails, the script will exit immediately.
+	- Tasks other than create and mount that fail will not stop on error.
+	- You'll have to assess the errors and make the choice to `bastille destroy` and start over or apply some fixes manually.
 	- It will _not_ attempt to fix or clean.
 	- It will _not_ stop on settings, sysrc, or command task errors.
-	- You'll have to assess the errors and make the choice to `bastille destroy` and start over or apply some fixes manually.
 
 ## Todo / Nice to have's
-- **Order of Operations**: Configure execution order for different tasks (e.g., applying templates before mounts or CMDs).
 - **Dynamic Configuration (`#!ARG`)**: Allow host-side command execution to populate variables for use in `CMD` or `SETTINGS`.
 	- *Example*: `#!ARG` -> `newuser=$(whoami)` then in `CMD` use `pw useradd $newuser`
 - **More Validation**: Catch things like malformed jail names and IP addrs (and **ARGS** so we try our best to not bork the host).
