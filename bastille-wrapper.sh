@@ -106,11 +106,13 @@ process_section() {
             case "$target_section" in
                 SETTINGS)
                     echo "Applying setting: $line"
-                    bastille config "$JNAME" set $line
+                    eval "set -- $line"
+                    bastille config "$JNAME" set "$@"
                     ;;
                 MOUNTS)
                     echo "Applying mount: $line"
-                    if ! bastille mount "$JNAME" $line; then
+                    eval "set -- $line"
+                    if ! bastille mount "$JNAME" "$@"; then
                         exit 1
                     fi
                     ;;
@@ -124,7 +126,8 @@ process_section() {
                     ;;
                 COPY)
                     echo "Copying file: $line"
-                    bastille cp "$JNAME" $line
+                    eval "set -- $line"
+                    bastille cp "$JNAME" "$@"
                     ;;
                 CMD)
                     echo "Executing in jail: $line"
