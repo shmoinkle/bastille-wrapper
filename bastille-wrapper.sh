@@ -118,11 +118,13 @@ process_section() {
                     ;;
                 SYSRC)
                     echo "Applying sysrc: $line"
-                    bastille sysrc "$JNAME" "$line"
+                    eval "set -- $line"
+                    bastille sysrc "$JNAME" "$@"
                     ;;
                 TEMPLATES)
                     echo "Applying template: $line"
-                    bastille template "$JNAME" "$line"
+                    eval "set -- $line"
+                    bastille template "$JNAME" "$@"
                     ;;
                 COPY)
                     echo "Copying file: $line"
