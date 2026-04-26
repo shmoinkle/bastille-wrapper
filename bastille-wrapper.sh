@@ -93,14 +93,15 @@ process_section() {
     [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ] && return
     local in_section=0
     while IFS= read -r line; do
+        line=$(echo "$line" | tr -d '\r')
         if [ "$line" = "#!$target_section" ]; then
             in_section=1
             continue
         fi
         if [ "$in_section" -eq 1 ]; then
             case "$line" in
-                ""|"#!"*) break ;;
-                "#"*) continue ;;
+                "#!"*) break ;;
+                ""|"#"*) continue ;;
             esac
             
             case "$target_section" in
@@ -147,9 +148,8 @@ get_order() {
     local current_section=""
 
     while IFS= read -r line; do
+        line=$(echo "$line" | tr -d '\r')
         case "$line" in
-            ""|"#"*) continue ;;
-            "#"*) continue ;;
             "#!"*) 
                 current_section="${line#*!}"
                 if [ "$current_section" = "ORDER" ]; then
@@ -161,9 +161,18 @@ get_order() {
                         continue
                     fi
                 fi
+                if [ "$order_processed" -eq 1 ]; then
+                    break
+                fi
                 is_first_section=0
                 [ "$order_processed" -eq 0 ] && break
                 continue
+                ;;
+            ""|"#"*) 
+                if [ "$order_processed" -eq 1 ] && [ -z "$line" ]; then
+                    break
+                fi
+                continue 
                 ;;
             *)
                 if [ "$order_processed" -eq 1 ]; then
