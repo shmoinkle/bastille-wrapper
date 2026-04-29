@@ -4,7 +4,9 @@ This directory contains configuration blueprints for orchestrating jails with `b
 
 ## FlareSolverr (`flaresolverr.example.conf`)
 
-This configuration orchestrates a FlareSolverr that works out of the box with one command.
+This configuration orchestrates a FlareSolverr jail that works out of the box with one command.
+
+`bastille-wrapper.sh -cbDx -n flare -i 192.168.1.254/24 -I em0 -C flaresolverr.example.conf`
 
 - **Environment Setup**: Configures system settings (`sysvipc`) and basic services.
 - **X11 & Browser Stack**: Installs `chromium`, `xorg-vfbserver`, and `python313` 
@@ -15,4 +17,4 @@ This configuration orchestrates a FlareSolverr that works out of the box with on
     - Creates a dedicated `flaresolverr` user.
     - Clones the repository and initializes a Python Virtual Environment (`venv`).
     - Installs dependencies via `pip`.
-- **Persistence**: Configures `crontab` entries to ensure the service starts on boot and remains running via the launcher script.
+- **Persistence**: Configures `crontab` entries to ensure the service starts on boot and remains running via the launcher script.Example

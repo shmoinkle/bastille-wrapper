@@ -11,21 +11,21 @@ Apart from basic examples in the **configs** directory, I include some real and 
 ## Usage
 
 ```bash
-./bastille-wrapper.sh -n NAME -i IP [options]
+./bastille-wrapper.sh [options] CONFIG
 ```
 
 ### Options
-- `-n NAME`: Jail name
-- `-i IP`: Jail IP address (CIDR or 'DHCP').
+- `-n NAME`: Jail name (required).
+- `-c`: Create jail (requires `-i IP`)
+- `-i IP`: Jail IP address (CIDR or 'DHCP'). Required only if `-c` is used.
 - `-I IF`: Network interface (default in `config.conf`).
 - `-R RELEASE`: FreeBSD release (default in `config.conf`).
-- `-C FILE`: Consolidated configuration file (see below).
 - `-b`: Enable boot after creation (default is `--no-boot`).
 - `-B`: Bridge mode (requires a bridge interface).
 - `-D`: Enable IPv4 and IPv6.
-- `-M`: Static MAC address.
+- `-M`: Assign static MAC address.
 - `-V`: VNET mode.
-- `-x`: Restart jail after creation.
+- `-x`: Restart jail after orchestration.
 
 ---
 
@@ -43,11 +43,6 @@ Apart from basic examples in the **configs** directory, I include some real and 
 	- You configure the **ORDER** setting (read below).
 
 - `#!ORDER`: Define the execution order of sections.
-	- The first command should be **CREATE** if you are making a new jail.
-		- When **CREATE** isn't called, flags related only to **CREATE** tasks* are ignored and won't impact the run.
-		- Full list of ignored flags when **CREATE** isn't called: _-i, -I, -R, -B, -D, -M, -V_
-	- If you don't specify **CREATE** first, the script will apply settings to the jail name provided.
-		- If **CREATE** is not the first in the list, it is skipped.
 	- Use keyword **RESTART** to trigger a jail restart during orchestration.
 	- You can repeat task blocks (run **TEMPLATES** then **CMD** then **TEMPLATES** again).
 	- You cannot specify **ORDER** in the list to avoid 🔁
@@ -60,17 +55,22 @@ Apart from basic examples in the **configs** directory, I include some real and 
 
 ## Example
 
-### The command
-- This will spin up your new jail **app1** with your blueprint **app1.conf**
+### Deployment of new jail
+- This will create the jail **app1** and then apply your blueprint **app1.conf**
 ```bash
-bastille-wrapper.sh -bBDMx -n app1 -i 10.0.0.40/24 -I bridge1 -C app1.conf
+bastille-wrapper.sh -c -n app1 -i 192.168.1.40/24 -I em0 app1.conf
+```
+
+### Applying to existing jail
+- This will apply **app1.conf** to an existing jail named **app1**
+```bash
+bastille-wrapper.sh -n app1 app1.conf
 ```
 
 ### Jail Configuration File
 - **app1.conf's** contents _(**jail.example.conf** is used in this example)_
 ```bash
 #!ORDER
-CREATE
 SETTINGS
 MOUNTS
 RESTART
@@ -108,8 +108,8 @@ pw useradd checker -u 1001 -d /nonexistent -s /sbin/nologin
 echo "* * * * * /root/lazy-check-that-thing.sh" | crontab -u checker -
 
 ```
-### Result
-- This is the the list of commands that will be run to make **app1**
+### Result (Deployment Mode)
+- This is the the list of commands that will be run to deploy **app1**
 ```bash
 bastille create -B -M -D app1 14.3-RELEASE 10.0.0.40/24 bridge1
 bastille config app1 set priority 50
@@ -122,6 +122,7 @@ bastille mount app1 "/home/app1/music\ files" /mnt/music nullfs rw 0 0
 bastille restart app1
 bastille template app1 user/skeljail
 bastille template app1 user/my-custom-template
+bastille template app1 me/skeljail
 bastille sysrc app1 nginx_enable="YES"
 bastille sysrc app1 php_fpm_enable="YES"
 bastille restart app1
@@ -134,8 +135,8 @@ bastille restart app1
 ---
 
 ## What it Does
-- **Validates `config.conf`**: Ensures `BASTILLE_ROOT` and `RELEASE` exist as directories.
-- **Validates Interface**: Checks if the interface (`-I`) exists on the host.
+- **Validates `config.conf`**: Ensures `BASTILLE_ROOT` and `RELEASE` exist as directories. Enforced only when creating a jail (`-c`).
+- **Validates Interface**: Checks if the interface exists on the host. Enforced only when creating a jail (`-c`).
 - **Bridge Check**: Verifies the interface is actually a bridge if `-B` is passed.
 - **Network Exclusivity**: Prevents using both `-B` and `-V` at the same time.
 

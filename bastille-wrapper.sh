@@ -7,18 +7,8 @@
 #   this script only does basic sanity checks so make sure your confs
 #   are good (no bad paths or typos).
 
-. "$(dirname "$0")/configs/config.conf"
-
-if [ ! -d "$BASTILLE_ROOT" ]; then
-    echo "Error: Bastille root not a directory -> ${BASTILLE_ROOT}"
-    exit 1
-elif [ ! -d "${BASTILLE_ROOT}/releases/${RELEASE}" ]; then
-    echo "Error: Release ${RELEASE} not found -> ${BASTILLE_ROOT}/releases/${RELEASE}"
-    exit 1
-elif ! ifconfig "$IF" >/dev/null 2>&1; then
-    echo "Error: Interface $IF does not exist"
-    exit 1
-fi
+CONFIG_CONF="$(dirname "$0")/configs/config.conf"
+[ -f "$CONFIG_CONF" ] && . "$CONFIG_CONF"
 
 BOOT='--no-boot'
 JNAME=''
@@ -28,65 +18,95 @@ F_BRIDGE=''
 F_VNET=''
 F_MAC=''
 F_DUAL=''
+F_CREATE=''
 F_RESTART=''
 
+[ -z "$RELEASE" ] && RELEASE=$(uname -r | cut -d- -f1,2)
+
 usage() {
-    echo "Usage: $0 -n name -i ip [options]"
+    echo "Usage: $0 [options] CONFIG"
     echo "Options:"
     echo "  -n NAME      Jail name (required)"
-    echo "  -i IP        Jail IP (required. can also be DHCP)"
-    echo "  -I IF        Interface (default: em0)"
-    echo "  -R RELEASE   FreeBSD release (default: 14.3-RELEASE)"
-    echo "  -C FILE      Configuration file"
+    echo "  -c           Create jail (requires -i IP and -I IF)"
+    echo "  -i IP        Jail IP (required for create. can also be DHCP)"
+    echo "  -I IF        Interface (required for create)"
+    echo "  -R RELEASE   FreeBSD release (default: $RELEASE)"
     echo "  -b           Enable boot"
     echo "  -B           Bridge mode (ensure IF is a bridge)"
     echo "  -D           Enable IPv4 & IPv6"
     echo "  -M           Assign static mac address"
     echo "  -V           VNET mode"
-    echo "  -x           Restart jail after creation"
+    echo "  -x           Restart jail after orchestration"
     exit 1
 }
 
-while getopts "n:i:I:R:C:bBDMVx" opt; do
+while getopts "n:i:I:R:bBDMVcx" opt; do
     case "$opt" in
         n) JNAME=$OPTARG ;;
         i) IP=$OPTARG ;;
         I) IF=$OPTARG ;;
         R) RELEASE=$OPTARG ;;
-        C) CONFIG_FILE=$OPTARG ;;
         b) BOOT='' ;;
         B) F_BRIDGE='-B' ;;
         D) F_DUAL='-D' ;;
         M) F_MAC='-M' ;;
         V) F_VNET='-V' ;;
+        c) F_CREATE='1' ;;
         x) F_RESTART='1' ;;
         *) usage ;;
     esac
 done
 
-if [ -n "$CONFIG_FILE" ] && [ ! -f "$CONFIG_FILE" ]; then
+shift $((OPTIND-1))
+CONFIG_FILE=$1
+
+if [ -z "$CONFIG_FILE" ]; then
+    echo "Error: Configuration file is required."
+    usage
+fi
+
+if [ ! -f "$CONFIG_FILE" ]; then
     echo "Error: Configuration file $CONFIG_FILE not found."
     exit 1
 fi
 
-if [ -z "$JNAME" ] || [ -z "$IP" ]; then
-    echo "Error: Name (-n) and IP (-i) are required."
+if [ -z "$JNAME" ]; then
+    echo "Error: Jail name (-n) is required."
     usage
 fi
 
-if [ -n "$F_BRIDGE" ] && [ -n "$F_VNET" ]; then
-    echo "Error: Cannot use Bridge mode (-B) and VNET mode (-V) simultaneously."
-    exit 1
-fi
+if [ -n "$F_CREATE" ]; then
+    if [ -z "$IP" ]; then
+        echo "Error: IP (-i) is required when creating a jail (-c)."
+        usage
+    fi
+    if [ -z "$IF" ]; then
+        echo "Error: Interface (-I) is required when creating a jail (-c)."
+        usage
+    fi
 
-if [ -n "$F_BRIDGE" ]; then
-    if ! ifconfig "$IF" 2>/dev/null | grep -q "groups: bridge"; then
-        echo "Error: Interface $IF is not a bridge, but Bridge mode (-B) was specified."
+    if ! bastille list release | grep -q "^${RELEASE}"; then
+        echo "Error: Release ${RELEASE} not present. Run 'bastille bootstrap ${RELEASE}'"
         exit 1
+    elif ! ifconfig "$IF" >/dev/null 2>&1; then
+        echo "Error: Interface $IF does not exist"
+        exit 1
+    fi
+
+    if [ -n "$F_BRIDGE" ] && [ -n "$F_VNET" ]; then
+        echo "Error: Cannot use Bridge mode (-B) and VNET mode (-V) simultaneously."
+        exit 1
+    fi
+
+    if [ -n "$F_BRIDGE" ]; then
+        if ! ifconfig "$IF" 2>/dev/null | grep -q "groups: bridge"; then
+            echo "Error: Interface $IF is not a bridge, but Bridge mode (-B) was specified."
+            exit 1
+        fi
     fi
 fi
 
-DEFAULT_ORDER="CREATE SETTINGS MOUNTS SYSRC TEMPLATES COPY CMD"
+DEFAULT_ORDER="SETTINGS MOUNTS SYSRC TEMPLATES COPY CMD"
 
 process_section() {
     local target_section=$1
@@ -140,6 +160,7 @@ process_section() {
         fi
     done < "$CONFIG_FILE"
 }
+
 get_order() {
     local custom_order=""
     local seen_header=0
@@ -196,24 +217,20 @@ get_order() {
 order=$(get_order)
 echo "Execution Order: $order"
 
-is_first_step=1
+if [ -n "$F_CREATE" ]; then
+    echo "Creating jail: $JNAME..."
+    if ! bastille create $F_BRIDGE $F_VNET $F_MAC $F_DUAL $BOOT "$JNAME" "$RELEASE" "$IP" "$IF"; then
+        exit 1
+    fi
+fi
+
 for section in $order; do
-    if [ "$section" = "CREATE" ]; then
-        if [ "$is_first_step" -eq 1 ]; then
-            echo "Creating jail: $JNAME..."
-            if ! bastille create $F_BRIDGE $F_VNET $F_MAC $F_DUAL $BOOT "$JNAME" "$RELEASE" "$IP" "$IF"; then
-                exit 1
-            fi
-        else
-            echo "Skipping CREATE task as it was not first in ORDER list." >&2
-        fi
-    elif [ "$section" = "RESTART" ]; then
+    if [ "$section" = "RESTART" ]; then
         echo "Restarting jail $JNAME..."
         bastille restart "$JNAME"
     else
         process_section "$section"
     fi
-    is_first_step=0
 done
 
 if [ -n "$F_RESTART" ]; then
